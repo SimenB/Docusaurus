@@ -5,24 +5,25 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+const fs = require('fs');
 const path = require('path');
 const versions = require('./versions.json');
+const math = require('remark-math');
+const katex = require('rehype-katex');
+const VersionsArchived = require('./versionsArchived.json');
 
-// This probably only makes sense for the alpha phase, temporary
-function getNextAlphaVersionName() {
-  const expectedPrefix = '2.0.0-alpha.';
+// This probably only makes sense for the beta phase, temporary
+function getNextBetaVersionName() {
+  const expectedPrefix = '2.0.0-beta.';
 
   const lastReleasedVersion = versions[0];
   if (!lastReleasedVersion.includes(expectedPrefix)) {
     throw new Error(
-      'this code is only meant to be used during the 2.0 alpha phase.',
+      'this code is only meant to be used during the 2.0 beta phase.',
     );
   }
-  const alphaBuild = parseInt(
-    lastReleasedVersion.replace(expectedPrefix, ''),
-    10,
-  );
-  return `${expectedPrefix}${alphaBuild + 1}`;
+  const version = parseInt(lastReleasedVersion.replace(expectedPrefix, ''), 10);
+  return `${expectedPrefix}${version + 1}`;
 }
 
 const allDocHomesPaths = [
@@ -54,14 +55,39 @@ const isVersioningDisabled = !!process.env.DISABLE_VERSIONING || isI18nStaging;
   projectName: 'docusaurus',
   baseUrl,
   baseUrlIssueBanner: true,
-  url: 'https://v2.docusaurus.io',
+  url: 'https://docusaurus.io',
+  // Dogfood both settings:
+  // - force trailing slashes for deploy previews
+  // - avoid trailing slashes in prod
+  trailingSlash: isDeployPreview,
+  stylesheets: [
+    {
+      href: 'https://cdn.jsdelivr.net/npm/katex@0.13.11/dist/katex.min.css',
+      integrity:
+        'sha384-Um5gpz1odJg5Z4HAmzPtgZKdTBHZdw8S29IecapCSB31ligYPhHQZMIlWLYQGVoc',
+      crossorigin: 'anonymous',
+    },
+  ],
   i18n: {
     defaultLocale: 'en',
-    locales: isI18nStaging
+    locales: isDeployPreview
+      ? // Deploy preview: keep it fast!
+        ['en']
+      : isI18nStaging
       ? // Staging locales: https://docusaurus-i18n-staging.netlify.app/
-        ['en', 'zh-CN', 'ko', 'ja']
+        ['en', 'ja']
       : // Production locales
-        ['en', 'fr'],
+        ['en', 'fr', 'ko', 'zh-CN'],
+  },
+  webpack: {
+    jsLoader: (isServer) => ({
+      loader: require.resolve('esbuild-loader'),
+      options: {
+        loader: 'tsx',
+        format: isServer ? 'cjs' : undefined,
+        target: isServer ? 'node12' : 'es2017',
+      },
+    }),
   },
   onBrokenLinks: 'throw',
   onBrokenMarkdownLinks: 'warn',
@@ -78,6 +104,7 @@ const isVersioningDisabled = !!process.env.DISABLE_VERSIONING || isI18nStaging;
       {
         id: 'community',
         path: 'community',
+        routeBasePath: 'community',
         editUrl: ({locale, versionDocsDirPath, docPath}) => {
           if (locale !== 'en') {
             return `https://crowdin.com/project/docusaurus-v2/${locale}`;
@@ -85,12 +112,24 @@ const isVersioningDisabled = !!process.env.DISABLE_VERSIONING || isI18nStaging;
           return `https://github.com/facebook/docusaurus/edit/master/website/${versionDocsDirPath}/${docPath}`;
         },
         editCurrentVersion: true,
-        routeBasePath: 'community',
         sidebarPath: require.resolve('./sidebarsCommunity.js'),
         showLastUpdateAuthor: true,
         showLastUpdateTime: true,
       },
     ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        // This plugin instance is used to test fancy edge cases
+        id: 'docs-tests',
+        routeBasePath: 'docs-tests',
+        sidebarPath: 'dogfooding/docs-tests-sidebars.js',
+
+        // Using a symlinked folder as source, test for use-case https://github.com/facebook/docusaurus/issues/3272
+        path: fs.realpathSync('dogfooding/docs-tests-symlink'),
+      },
+    ],
+
     [
       '@docusaurus/plugin-content-blog',
       {
@@ -162,7 +201,7 @@ const isVersioningDisabled = !!process.env.DISABLE_VERSIONING || isI18nStaging;
           {
             tagName: 'link',
             rel: 'manifest',
-            href: `${baseUrl}manifest.json`,
+            href: 'manifest.json',
           },
           {
             tagName: 'meta',
@@ -187,7 +226,7 @@ const isVersioningDisabled = !!process.env.DISABLE_VERSIONING || isI18nStaging;
           {
             tagName: 'link',
             rel: 'mask-icon',
-            href: 'img/docusaurus.svg',
+            href: 'img/docusaurus.png',
             color: 'rgb(62, 204, 94)',
           },
           {
@@ -214,7 +253,7 @@ const isVersioningDisabled = !!process.env.DISABLE_VERSIONING || isI18nStaging;
         docs: {
           // routeBasePath: '/',
           path: 'docs',
-          sidebarPath: require.resolve('./sidebars.js'),
+          sidebarPath: 'sidebars.js',
           editUrl: ({locale, docPath}) => {
             if (locale !== 'en') {
               return `https://crowdin.com/project/docusaurus-v2/${locale}`;
@@ -227,8 +266,10 @@ const isVersioningDisabled = !!process.env.DISABLE_VERSIONING || isI18nStaging;
           showLastUpdateAuthor: true,
           showLastUpdateTime: true,
           remarkPlugins: [
+            math,
             [require('@docusaurus/remark-plugin-npm2yarn'), {sync: true}],
           ],
+          rehypePlugins: [katex],
           disableVersioning: isVersioningDisabled,
           lastVersion: isDev ? 'current' : undefined,
           onlyIncludeVersions:
@@ -237,13 +278,13 @@ const isVersioningDisabled = !!process.env.DISABLE_VERSIONING || isI18nStaging;
               : undefined,
           versions: {
             current: {
-              label: `${getNextAlphaVersionName()} 🚧`,
+              label: `${getNextBetaVersionName()} 🚧`,
             },
           },
         },
         blog: {
           // routeBasePath: '/',
-          path: '../website-1.x/blog',
+          path: 'blog',
           editUrl: ({locale, blogDirPath, blogPath}) => {
             if (locale !== 'en') {
               return `https://crowdin.com/project/docusaurus-v2/${locale}`;
@@ -271,6 +312,7 @@ const isVersioningDisabled = !!process.env.DISABLE_VERSIONING || isI18nStaging;
     liveCodeBlock: {
       playgroundPosition: 'bottom',
     },
+    sidebarCollapsible: true,
     hideableSidebar: true,
     colorMode: {
       defaultMode: 'light',
@@ -278,19 +320,22 @@ const isVersioningDisabled = !!process.env.DISABLE_VERSIONING || isI18nStaging;
       respectPrefersColorScheme: true,
     },
     announcementBar: {
-      id: 'supportus',
+      id: 'announcementBar-1', // Increment on change
       content:
-        '⭐️ If you like Docusaurus, give it a star on <a target="_blank" rel="noopener noreferrer" href="https://github.com/facebook/docusaurus">GitHub</a>! ⭐️',
+        '⭐️ If you like Docusaurus, give it a star on <a target="_blank" rel="noopener noreferrer" href="https://github.com/facebook/docusaurus">GitHub</a>! ⭐',
     },
     prism: {
       theme: require('prism-react-renderer/themes/github'),
       darkTheme: require('prism-react-renderer/themes/dracula'),
+      additionalLanguages: ['java'],
     },
     image: 'img/docusaurus-soc.png',
     // metadatas: [{name: 'twitter:card', content: 'summary'}],
-    gtag: {
-      trackingID: 'UA-141789564-1',
-    },
+    gtag: !isDeployPreview
+      ? {
+          trackingID: 'UA-141789564-1',
+        }
+      : undefined,
     algolia: {
       apiKey: '47ecd3b21be71c5822571b9f59e52544',
       indexName: 'docusaurus-2',
@@ -331,6 +376,16 @@ const isVersioningDisabled = !!process.env.DISABLE_VERSIONING || isI18nStaging;
           position: 'right',
           dropdownActiveClassDisabled: true,
           dropdownItemsAfter: [
+            ...Object.entries(VersionsArchived).map(
+              ([versionName, versionUrl]) => ({
+                label: versionName,
+                href: versionUrl,
+              }),
+            ),
+            {
+              href: 'https://v1.docusaurus.io',
+              label: '1.x.x',
+            },
             {
               to: '/versions',
               label: 'All versions',
@@ -342,7 +397,7 @@ const isVersioningDisabled = !!process.env.DISABLE_VERSIONING || isI18nStaging;
           position: 'right',
           dropdownItemsAfter: [
             {
-              to: 'https://github.com/facebook/docusaurus/issues/3526',
+              href: 'https://github.com/facebook/docusaurus/issues/3526',
               label: 'Help Us Translate',
             },
           ],

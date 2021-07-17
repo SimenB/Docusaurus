@@ -5,11 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import globby from 'globby';
 import fs from 'fs';
 import path from 'path';
-import minimatch from 'minimatch';
-import slash from 'slash';
 import {
   encodePath,
   fileToPath,
@@ -18,6 +15,8 @@ import {
   getPluginI18nPath,
   getFolderContainingFile,
   addTrailingPathSeparator,
+  Globby,
+  createMatcher,
 } from '@docusaurus/utils';
 import {
   LoadContext,
@@ -26,7 +25,7 @@ import {
   ValidationResult,
   ConfigureWebpackUtils,
 } from '@docusaurus/types';
-import {Configuration, Loader} from 'webpack';
+import {Configuration} from 'webpack';
 import admonitions from 'remark-admonitions';
 import {PluginOptionSchema} from './pluginOptionSchema';
 import {
@@ -81,11 +80,6 @@ export default function pluginContentPages(
   );
   const dataDir = path.join(pluginDataDirRoot, options.id ?? DEFAULT_PLUGIN_ID);
 
-  const excludeRegex = new RegExp(
-    options.exclude
-      .map((pattern) => minimatch.makeRe(pattern).source)
-      .join('|'),
-  );
   return {
     name: 'docusaurus-plugin-content-pages',
 
@@ -116,7 +110,7 @@ export default function pluginContentPages(
       }
 
       const {baseUrl} = siteConfig;
-      const pagesFiles = await globby(include, {
+      const pagesFiles = await Globby(include, {
         cwd: contentPaths.contentPath,
         ignore: options.exclude,
       });
@@ -192,7 +186,7 @@ export default function pluginContentPages(
     configureWebpack(
       _config: Configuration,
       isServer: boolean,
-      {getBabelLoader, getCacheLoader}: ConfigureWebpackUtils,
+      {getJSLoader}: ConfigureWebpackUtils,
     ) {
       const {
         rehypePlugins,
@@ -214,8 +208,7 @@ export default function pluginContentPages(
                 // Trailing slash is important, see https://github.com/facebook/docusaurus/pull/3970
                 .map(addTrailingPathSeparator),
               use: [
-                getCacheLoader(isServer),
-                getBabelLoader(isServer),
+                getJSLoader({isServer}),
                 {
                   loader: require.resolve('@docusaurus/mdx-loader'),
                   options: {
@@ -224,20 +217,16 @@ export default function pluginContentPages(
                     beforeDefaultRehypePlugins,
                     beforeDefaultRemarkPlugins,
                     staticDir: path.join(siteDir, STATIC_DIR_NAME),
-                    // Note that metadataPath must be the same/in-sync as
-                    // the path from createData for each MDX.
+                    isMDXPartial: createMatcher(options.exclude),
                     metadataPath: (mdxPath: string) => {
-                      if (excludeRegex.test(slash(mdxPath))) {
-                        return null;
-                      }
+                      // Note that metadataPath must be the same/in-sync as
+                      // the path from createData for each MDX.
                       const aliasedSource = aliasedSitePath(mdxPath, siteDir);
                       return path.join(
                         dataDir,
                         `${docuHash(aliasedSource)}.json`,
                       );
                     },
-                    forbidFrontMatter: (mdxPath: string) =>
-                      excludeRegex.test(slash(mdxPath)),
                   },
                 },
                 {
@@ -247,7 +236,7 @@ export default function pluginContentPages(
                     // contentPath,
                   },
                 },
-              ].filter(Boolean) as Loader[],
+              ].filter(Boolean),
             },
           ],
         },
